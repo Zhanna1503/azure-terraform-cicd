@@ -1,0 +1,72 @@
+# Stage template: the same Plan + Deploy flow, reused for every environment.
+parameters:
+  - name: environment
+    type: string
+  - name: dependsOn
+    type: string
+  - name: serviceConnection
+    type: string
+
+stages:
+  # ---------- PLAN: runs on PRs and on main ----------
+  - stage: Plan_${{ parameters.environment }}
+    displayName: Plan ${{ parameters.environment }}
+    dependsOn: ${{ parameters.dependsOn }}
+    ${{ if eq(parameters.environment, 'prod') }}:
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: Plan
+        steps:
+          - task: AzureCLI@2
+            name: tf
+            displayName: Terraform plan (${{ parameters.environment }})
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: scriptPath
+              scriptPath: scripts/tf.sh
+              arguments: plan ${{ parameters.environment }}
+              addSpnToEnvironment: true
+
+          - publish: infra/tfplan
+            artifact: tfplan-${{ parameters.environment }}
+            displayName: Save plan for the deploy stage
+
+  # ---------- DEPLOY: only on main, only if the plan found changes ----------
+  - stage: Deploy_${{ parameters.environment }}
+    displayName: Deploy ${{ parameters.environment }}
+    dependsOn: Plan_${{ parameters.environment }}
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    variables:
+      hasChanges: $[ stageDependencies.Plan_${{ parameters.environment }}.Plan.outputs['tf.hasChanges'] ]
+    jobs:
+      # A deployment job targets an Azure DevOps "environment".
+      # Approvals are configured on the environment (Pipelines > Environments > prod > Approvals).
+      - deployment: Deploy
+        environment: ${{ parameters.environment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - download: current
+                  artifact: tfplan-${{ parameters.environment }}
+
+                - script: cp $(Pipeline.Workspace)/tfplan-${{ parameters.environment }}/tfplan infra/tfplan
+                  displayName: Restore plan file
+
+                - task: AzureCLI@2
+                  displayName: Terraform apply (${{ parameters.environment }})
+                  inputs:
+                    azureSubscription: ${{ parameters.serviceConnection }}
+                    scriptType: bash
+                    scriptLocation: scriptPath
+                    scriptPath: scripts/tf.sh
+                    arguments: apply ${{ parameters.environment }}
+                    addSpnToEnvironment: true
+
+                - template: deploy-website.yml
+                  parameters:
+                    environment: ${{ parameters.environment }}
+                    serviceConnection: ${{ parameters.serviceConnection }}

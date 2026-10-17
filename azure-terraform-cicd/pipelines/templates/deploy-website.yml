@@ -1,0 +1,30 @@
+# Step template: stamp build info into the site and upload it to the static website container.
+parameters:
+  - name: environment
+    type: string
+  - name: serviceConnection
+    type: string
+
+steps:
+  - script: |
+      sed -i \
+        -e "s/__ENVIRONMENT__/${{ parameters.environment }}/g" \
+        -e "s/__BUILD__/$(Build.BuildNumber)/g" \
+        -e "s/__COMMIT__/$(Build.SourceVersion)/g" \
+        website/index.html
+    displayName: Stamp build info into website
+
+  - task: AzureCLI@2
+    displayName: Upload website (${{ parameters.environment }})
+    inputs:
+      azureSubscription: ${{ parameters.serviceConnection }}
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az storage blob upload-batch \
+          --account-name "$(storageAccountName)" \
+          --destination '$web' \
+          --source website \
+          --auth-mode login \
+          --overwrite
+        echo "Live at: $(websiteUrl)"
