@@ -1,0 +1,74 @@
+# Main pipeline. It runs by itself:
+#   - pull request to main -> check the code + preview dev (nothing changes in Azure)
+#   - push to main         -> check -> deploy dev -> wait for your approval -> deploy prod
+#   - by hand              -> Actions tab > CI/CD > "Run workflow"
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Only one run at a time per branch, so two runs never change Azure at the same moment.
+concurrency:
+  group: cicd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # lets the jobs get a short-lived Azure login token (OIDC), no password stored
+  contents: read  # lets the jobs read the code
+
+jobs:
+  validate:
+    name: Check code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v7
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      - name: Format check (terraform fmt)
+        run: terraform -chdir=infra fmt -check -recursive
+
+      - name: Syntax check (terraform validate)
+        run: |
+          terraform -chdir=infra init -backend=false -input=false
+          terraform -chdir=infra validate
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Security scan (Checkov)
+        # --soft-fail: show the findings, but don't stop the pipeline
+        run: |
+          pip install --quiet checkov
+          checkov --directory infra --framework terraform --compact --quiet --soft-fail
+
+  dev:
+    name: Dev
+    needs: validate
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: dev
+      # Pull request: only a preview. Push to main (or manual run on main): really deploy.
+      apply: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      tfstate_storage_account: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+    secrets: inherit
+
+  prod:
+    name: Prod
+    needs: dev
+    # Never for pull requests, only for main.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: prod
+      apply: true
+      tfstate_storage_account: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+    secrets: inherit

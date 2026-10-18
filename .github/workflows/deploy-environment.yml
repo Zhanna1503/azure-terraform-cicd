@@ -1,0 +1,118 @@
+# Template: the same steps for every environment.
+# pipeline.yml calls it twice - once for dev, once for prod.
+name: Deploy environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "dev or prod"
+        type: string
+        required: true
+      apply:
+        description: "false = only preview (plan), true = really change Azure"
+        type: boolean
+        default: false
+      tfstate_storage_account:
+        description: "Storage account that keeps the Terraform state"
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Plan and deploy
+    runs-on: ubuntu-latest
+    # Links the job to a GitHub environment. The "prod" environment has
+    # "Required reviewers" switched on - that is where the run waits for your approval.
+    environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      # Terraform reads these to log in to Azure with OIDC (no password, no key in the code).
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+      TFSTATE_RG: rg-tfstate
+      TFSTATE_SA: ${{ inputs.tfstate_storage_account }}
+      LOCATION: germanywestcentral
+
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v7
+
+      - name: Check the repository settings
+        run: |
+          missing=0
+          [ -n "$ARM_CLIENT_ID" ]       || { echo "::error::Secret AZURE_CLIENT_ID is missing (README, setup step 5)"; missing=1; }
+          [ -n "$ARM_TENANT_ID" ]       || { echo "::error::Secret AZURE_TENANT_ID is missing (README, setup step 5)"; missing=1; }
+          [ -n "$ARM_SUBSCRIPTION_ID" ] || { echo "::error::Secret AZURE_SUBSCRIPTION_ID is missing (README, setup step 5)"; missing=1; }
+          [ -n "$TFSTATE_SA" ]          || { echo "::error::Variable TFSTATE_STORAGE_ACCOUNT is missing (README, setup step 5)"; missing=1; }
+          exit $missing
+
+      - name: Log in to Azure (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Make sure the Terraform state storage exists
+        # Terraform needs a place to remember what it built. Created on the first run, then reused.
+        run: |
+          az provider register --namespace Microsoft.Storage --wait --output none
+          az group create --name "$TFSTATE_RG" --location "$LOCATION" --output none
+          if ! az storage account show --name "$TFSTATE_SA" --resource-group "$TFSTATE_RG" --output none 2>/dev/null; then
+            az storage account create --name "$TFSTATE_SA" --resource-group "$TFSTATE_RG" \
+              --location "$LOCATION" --sku Standard_LRS --min-tls-version TLS1_2 \
+              --allow-blob-public-access false --output none
+          fi
+          az storage container create --name tfstate --account-name "$TFSTATE_SA" \
+            --auth-mode key --output none
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init (connect to the state)
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=$TFSTATE_RG" \
+            -backend-config="storage_account_name=$TFSTATE_SA" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=${{ inputs.environment }}.tfstate"
+
+      - name: Terraform plan (preview of the changes)
+        run: |
+          terraform plan -input=false -var-file="env/${{ inputs.environment }}.tfvars" -out=tfplan
+          {
+            echo "### Terraform plan: ${{ inputs.environment }}"
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform apply (build it in Azure)
+        if: inputs.apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Upload the website
+        if: inputs.apply
+        run: |
+          SA="$(terraform output -raw storage_account_name)"
+          URL="$(terraform output -raw website_url)"
+          sed -i \
+            -e "s/__ENVIRONMENT__/${{ inputs.environment }}/g" \
+            -e "s/__BUILD__/${{ github.run_number }}/g" \
+            -e "s/__COMMIT__/${GITHUB_SHA::7}/g" \
+            ../website/index.html
+          az storage blob upload-batch --account-name "$SA" --destination "\$web" \
+            --source ../website --auth-mode key --overwrite --output none
+          echo "### Website (${{ inputs.environment }}): $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Live at: $URL"

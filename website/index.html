@@ -13,13 +13,13 @@
   </style>
 </head>
 <body>
-  <h1>Deployed by Azure Pipelines</h1>
+  <h1>Deployed by GitHub Actions</h1>
   <p>Environment: <span class="env">__ENVIRONMENT__</span></p>
   <dl>
     <dt>Build</dt><dd><code>__BUILD__</code></dd>
     <dt>Commit</dt><dd><code>__COMMIT__</code></dd>
     <dt>Infrastructure</dt><dd>Terraform (azurerm), remote state, OIDC auth</dd>
-    <dt>Pipeline</dt><dd>Validate &rarr; Plan &rarr; Deploy dev &rarr; Approval &rarr; Deploy prod</dd>
+    <dt>Pipeline</dt><dd>Check code &rarr; Plan &rarr; Deploy dev &rarr; Approval &rarr; Deploy prod</dd>
   </dl>
 </body>
 </html>

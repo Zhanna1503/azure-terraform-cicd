@@ -13,13 +13,18 @@ terraform {
   }
 
   # Remote state in an Azure Storage Account.
-  # Values are passed in by the pipeline via -backend-config (see pipelines/templates/terraform-plan.yml).
+  # The pipeline passes the details in via -backend-config
+  # (see .github/workflows/deploy-environment.yml).
   backend "azurerm" {}
 }
 
 provider "azurerm" {
   features {}
-  # Authentication comes from the pipeline's service connection
-  # (workload identity federation / OIDC) — no secrets in code.
-  use_oidc = true
+
+  # Login: the pipeline sets ARM_CLIENT_ID, ARM_TENANT_ID, ARM_SUBSCRIPTION_ID
+  # and ARM_USE_OIDC=true, so no password or key is stored in this code.
+
+  # The pipeline registers Microsoft.Storage itself, so skip the slow
+  # automatic registration of all Azure resource providers.
+  resource_provider_registrations = "none"
 }
