@@ -25,7 +25,7 @@ permissions:
 jobs:
   deploy:
     name: Plan and deploy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Links the job to a GitHub environment. The "prod" environment has
     # "Required reviewers" switched on - that is where the run waits for your approval.
     environment: ${{ inputs.environment }}
