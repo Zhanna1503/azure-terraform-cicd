@@ -53,6 +53,7 @@ jobs:
           [ -n "$ARM_TENANT_ID" ]       || { echo "::error::Secret AZURE_TENANT_ID is missing (README, setup step 5)"; missing=1; }
           [ -n "$ARM_SUBSCRIPTION_ID" ] || { echo "::error::Secret AZURE_SUBSCRIPTION_ID is missing (README, setup step 5)"; missing=1; }
           [ -n "$TFSTATE_SA" ]          || { echo "::error::Variable TFSTATE_STORAGE_ACCOUNT is missing (README, setup step 5)"; missing=1; }
+          echo "::notice::Client ID starts with ${ARM_CLIENT_ID:0:8}, tenant ID starts with ${ARM_TENANT_ID:0:8}"
           exit $missing
 
       - name: Log in to Azure (OIDC)
