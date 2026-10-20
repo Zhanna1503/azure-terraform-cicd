@@ -24,6 +24,10 @@ A small but production-style CI/CD setup: **Terraform** builds a static website 
 
 ![Deployed website](docs/website.png)
 
+**Resource groups in Azure: Terraform built `rg-cicddemo-dev` and `rg-cicddemo-prod`, the pipeline created `rg-tfstate` for the Terraform state**
+
+![Resource groups in the Azure portal](docs/resource-groups.png)
+
 **Passwordless login: the app registration in Microsoft Entra ID that the pipeline uses**
 
 ![App registration in Microsoft Entra ID](docs/entra-app-registration.png)
