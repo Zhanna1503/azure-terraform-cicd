@@ -7,8 +7,10 @@ name: CI/CD
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**"] # README or screenshot changes don't deploy anything
   pull_request:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
 
 # Only one run at a time per branch, so two runs never change Azure at the same moment.
